@@ -6,6 +6,7 @@ from termcolor import cprint
 import glob
 import PIL.Image as Image
 import time
+import params
 
 
 def variable_summaries(var):
@@ -43,10 +44,14 @@ def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
                           strides=[1, 2, 2, 1], padding='SAME')
 
+def create_dir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
 
 class ContextEncoder(object):
-    def __init__(self, batch_size, nb_epochs, batch_index=0, mask=None, mscoco="inpainting/", train_path="train2014",
-                 valid_path="val2014", caption_path="dict_key_imgID_value_caps_train_and_valid.pkl"):
+    def __init__(self, batch_size, nb_epochs, batch_index=0, mask=None, mscoco=params.DATA_PATH, train_path=params.TRAIN_PATH,
+                 valid_path=params.VALID_PATH, caption_path=params.CAPTION_PATH, experiment_path = params.EXPERIMENT_PATH):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
         self._train_batch_index = batch_index
@@ -55,6 +60,11 @@ class ContextEncoder(object):
         self.train_path = train_path
         self.valid_path = valid_path
         self.caption_path = caption_path
+        self.experiment_path = experiment_path
+        self.save_path = os.path.join(self.experiment_path, "model")
+        self.logs_path = os.path.join(self.experiment_path, "logs")
+        create_dir(self.save_path)
+        create_dir(self.logs_path)
 
         self.nb_bw_img = 0
 
@@ -159,8 +169,8 @@ class ContextEncoder(object):
                 uconv2d(self.h_uconv2, self.W_uconv3, output_shape=[self.batch_size, 32, 32, 3],
                         stride=1) + self.b_uconv3)
             self.y_padded = tf.pad(self.y, [[0, 0], [16, 16], [16, 16], [0, 0]])
-            tf.summary.image("original_image", self.x, max_outputs=6)
-            tf.summary.image("generated_image", self.y_padded + self.x_masked, max_outputs=6)
+            tf.summary.image("original_image", self.x, max_outputs=12)
+            tf.summary.image("generated_image", self.y_padded + self.x_masked, max_outputs=12)
 
     def _compute_loss(self):
         with tf.name_scope('reconstruction_loss'):
@@ -195,7 +205,7 @@ class ContextEncoder(object):
 
         self._train_batch_index = (self._train_batch_index + 1) % len(self.train_imgs)
 
-        print("batch loaded in : ", time.time() - start_time)
+        # print("batch loaded in : ", time.time() - start_time)
 
         return batch
 
@@ -219,11 +229,11 @@ class ContextEncoder(object):
 
         self._valid_batch_index = (self._valid_batch_index + 1) % len(self.train_imgs)
 
-        print("batch loaded in : ", time.time() - start_time)
+        # print("batch loaded in : ", time.time() - start_time)
 
         return batch
 
-    def _restore(self, save_name="model/"):
+    def _restore(self):
         """
         Retrieve last model saved if possible
         Create a main Saver object
@@ -235,11 +245,11 @@ class ContextEncoder(object):
         """
         saver = tf.train.Saver(max_to_keep=2)
         # Try to restore an old model
-        last_saved_model = tf.train.latest_checkpoint(save_name)
+        last_saved_model = tf.train.latest_checkpoint(self.save_path)
 
         self._sess.run(tf.global_variables_initializer())
 
-        summary_writer = tf.summary.FileWriter('logs/',
+        summary_writer = tf.summary.FileWriter(self.logs_path,
                                                graph=self._sess.graph,
                                                flush_secs=20)
         if last_saved_model is not None:
@@ -264,9 +274,6 @@ class ContextEncoder(object):
             Use to save all summaries for iteration, and validation accuracy for epoch operations
         :return:
         """
-        # Save metadata for embeddings
-        path_file = os.path.dirname(os.path.basename(__file__))
-        path_logs = os.path.join(path_file, "logs")
 
         current_iter = self._sess.run(self.global_step)
         # Epoch saving (model + embeddings)
@@ -275,7 +282,7 @@ class ContextEncoder(object):
             summary_writer.add_summary(extras, global_step=current_iter)
 
             # Save graph
-            saver.save(self._sess, global_step=current_iter, save_path="model/{}".format("model"))
+            saver.save(self._sess, global_step=current_iter, save_path=self.save_path)
 
         # Iter saving (write variable + loss)
         else:
@@ -313,7 +320,7 @@ class ContextEncoder(object):
 
                 _, loss, summary_str, global_step = self._sess.run([self.train_fn, self._reconstruction_loss, self.merged_summary, self.global_step],
                                                       feed_dict={self.x: batch, self.mask: self.np_mask})
-                print(global_step)
+                # print(global_step)
                 # global_step = self._sess.run(self.global_step)
 
                 if global_step % 200 == 0:
