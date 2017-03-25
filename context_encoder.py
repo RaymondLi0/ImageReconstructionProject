@@ -44,14 +44,17 @@ def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
                           strides=[1, 2, 2, 1], padding='SAME')
 
+
 def create_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
 
 
 class ContextEncoder(object):
-    def __init__(self, batch_size, nb_epochs, batch_index=0, mask=None, mscoco=params.DATA_PATH, train_path=params.TRAIN_PATH,
-                 valid_path=params.VALID_PATH, caption_path=params.CAPTION_PATH, experiment_path = params.EXPERIMENT_PATH):
+    def __init__(self, batch_size, nb_epochs, batch_index=0, mask=None, mscoco=params.DATA_PATH,
+                 train_path=params.TRAIN_PATH,
+                 valid_path=params.VALID_PATH, caption_path=params.CAPTION_PATH,
+                 experiment_path=params.EXPERIMENT_PATH):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
         self._train_batch_index = batch_index
@@ -61,7 +64,7 @@ class ContextEncoder(object):
         self.valid_path = valid_path
         self.caption_path = caption_path
         self.experiment_path = experiment_path
-        self.save_path = os.path.join(self.experiment_path, "model")
+        self.save_path = os.path.join(self.experiment_path, "model/")
         self.logs_path = os.path.join(self.experiment_path, "logs")
         create_dir(self.save_path)
         create_dir(self.logs_path)
@@ -94,7 +97,7 @@ class ContextEncoder(object):
         # x : input
         self.x = tf.placeholder(tf.float32, shape=[self.batch_size, 64, 64, 3])
         self.mask = tf.placeholder(tf.float32, shape=[1, 64, 64, 1])
-        self.x_masked = self.x * (1-self.mask)
+        self.x_masked = self.x * (1 - self.mask)
 
         self._encode()
         self._channel_wise()
@@ -203,16 +206,17 @@ class ContextEncoder(object):
             else:
                 self.nb_bw_img += 1
 
-        self._train_batch_index = (self._train_batch_index + 1) % len(self.train_imgs)
+        N_train_batch = len(self.train_imgs) // self.batch_size
+        self._train_batch_index = (self._train_batch_index + 1) % N_train_batch
 
         # print("batch loaded in : ", time.time() - start_time)
 
         return batch
 
-
     def _load_valid_batch(self):
         '''
         get next valid batch
+        TODO
         '''
         start_time = time.time()
         batch = np.zeros((self.batch_size, 64, 64, 3))
@@ -276,7 +280,7 @@ class ContextEncoder(object):
         """
 
         current_iter = self._sess.run(self.global_step)
-        # Epoch saving (model + embeddings)
+        # Epoch saving (model)
         if not is_iter:
             # Save validation_accuracy
             summary_writer.add_summary(extras, global_step=current_iter)
@@ -299,7 +303,6 @@ class ContextEncoder(object):
         epoch = 0
         n_train_batches = len(self.train_imgs) // self.batch_size
 
-
         # Retrieve current global step
         last_step = self._sess.run(self.global_step)
         epoch += last_step // n_train_batches
@@ -313,13 +316,14 @@ class ContextEncoder(object):
         while epoch < self.nb_epochs:
 
             for i in tqdm(range(n_train_batches)):
-                if i < last_iter and not is_not_restart :
+                if i < last_iter and not is_not_restart:
                     continue
                 is_not_restart = True
                 batch = self._load_train_batch()
 
-                _, loss, summary_str, global_step = self._sess.run([self.train_fn, self._reconstruction_loss, self.merged_summary, self.global_step],
-                                                      feed_dict={self.x: batch, self.mask: self.np_mask})
+                _, loss, summary_str, global_step = self._sess.run(
+                    [self.train_fn, self._reconstruction_loss, self.merged_summary, self.global_step],
+                    feed_dict={self.x: batch, self.mask: self.np_mask})
                 # print(global_step)
                 # global_step = self._sess.run(self.global_step)
 
@@ -338,7 +342,8 @@ class ContextEncoder(object):
         summary_writer.flush()
         summary_writer.close()
 
+
 if __name__ == '__main__':
-    ce = ContextEncoder(batch_size=16, nb_epochs=30)
+    ce = ContextEncoder(batch_size=32, nb_epochs=30)
     ce.build_model()
     ce.train()
