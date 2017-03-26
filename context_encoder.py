@@ -113,19 +113,23 @@ class ContextEncoder(object):
     def _encode(self):
         with tf.name_scope("encode"):
             with tf.name_scope('weights'):
-                self._W_conv1 = weight_variable([5, 5, 3, 64])
-                self._W_conv2 = weight_variable([5, 5, 64, 64])
-                self._W_conv3 = weight_variable([5, 5, 64, 128])
+                self._W_conv1 = weight_variable([5, 5, 3, 128])
+                self._W_conv2 = weight_variable([5, 5, 128, 256])
+                self._W_conv3 = weight_variable([5, 5, 256, 512])
+                self._W_conv4 = weight_variable([5, 5, 512, 512])
                 variable_summaries(self._W_conv1)
                 variable_summaries(self._W_conv2)
                 variable_summaries(self._W_conv3)
+                variable_summaries(self._W_conv4)
             with tf.name_scope('biases'):
-                self._b_conv1 = bias_variable([64])
-                self._b_conv2 = bias_variable([64])
-                self._b_conv3 = bias_variable([128])
+                self._b_conv1 = bias_variable([128])
+                self._b_conv2 = bias_variable([256])
+                self._b_conv3 = bias_variable([512])
+                self._b_conv4 = bias_variable([512])
                 variable_summaries(self._b_conv1)
                 variable_summaries(self._b_conv2)
                 variable_summaries(self._b_conv3)
+                variable_summaries(self._b_conv4)
             self.h_conv1 = tf.nn.relu(conv2d(self.x_masked, self._W_conv1, stride=1) + self._b_conv1)
             self.h_pool1 = max_pool_2x2(self.h_conv1)
 
@@ -134,45 +138,54 @@ class ContextEncoder(object):
 
             self.h_conv3 = tf.nn.relu(conv2d(self.h_pool2, self._W_conv3, stride=1) + self._b_conv3)
             self.h_pool3 = max_pool_2x2(self.h_conv3)
+            
+            self.h_conv4 = tf.nn.relu(conv2d(self.h_pool3, self._W_conv4, stride=1) + self._b_conv4)
+            self.h_pool4 = max_pool_2x2(self.h_conv4)
 
     def _channel_wise(self):
         with tf.name_scope('channel_wise'):
             with tf.name_scope('weights'):
-                self._W_fc1 = weight_variable([128, 8 * 8, 8 * 8])
+                self._W_fc1 = weight_variable([512, 4 * 4, 4 * 4])
                 variable_summaries(self._W_fc1)
             with tf.name_scope('biases'):
-                self._b_fc1 = bias_variable([128])
+                self._b_fc1 = bias_variable([512])
                 variable_summaries(self._b_fc1)
-            self.h_pool3_flat_img = tf.reshape(self.h_pool3, [128, self.batch_size, 8 * 8])
+            self.h_pool4_flat_img = tf.reshape(self.h_pool4, [512, self.batch_size, 4 * 4])
             self.h_fc1 = tf.nn.relu(
-                tf.reshape(tf.matmul(self.h_pool3_flat_img, self._W_fc1), [self.batch_size, 64, 128]) + self._b_fc1)
+                tf.reshape(tf.matmul(self.h_pool4_flat_img, self._W_fc1), [self.batch_size, 16, 512]) + self._b_fc1)
 
-            self.h_fc1_img = tf.reshape(self.h_fc1, [-1, 8, 8, 128])
+            self.h_fc1_img = tf.reshape(self.h_fc1, [-1, 4, 4, 512])
 
     def _decode(self):
         # print(self.h_fc1_img.get_shape().as_list())
         with tf.name_scope('decode'):
             with tf.name_scope('weights'):
-                self._W_uconv1 = weight_variable([5, 5, 64, 128])
-                self._W_uconv2 = weight_variable([5, 5, 64, 64])
+                self._W_uconv1 = weight_variable([5, 5, 256, 512])
+                self._W_uconv2 = weight_variable([5, 5, 128, 256])
+                self._W_uconv3 = weight_variable([5, 5, 128, 128])
             with tf.name_scope('biases'):
-                self._b_uconv1 = bias_variable([64])
-                self._b_uconv2 = bias_variable([64])
+                self._b_uconv1 = bias_variable([256])
+                self._b_uconv2 = bias_variable([128])
+                self._b_uconv3 = bias_variable([128])
             self.h_uconv1 = tf.nn.relu(
-                uconv2d(self.h_fc1_img, self._W_uconv1, output_shape=[self.batch_size, 16, 16, 64],
+                uconv2d(self.h_fc1_img, self._W_uconv1, output_shape=[self.batch_size, 8, 8, 256],
                         stride=2) + self._b_uconv1)
 
             self.h_uconv2 = tf.nn.relu(
-                uconv2d(self.h_uconv1, self._W_uconv2, output_shape=[self.batch_size, 32, 32, 64],
+                uconv2d(self.h_uconv1, self._W_uconv2, output_shape=[self.batch_size, 16, 16, 128],
                         stride=2) + self._b_uconv2)
+
+            self.h_uconv3 = tf.nn.relu(
+                uconv2d(self.h_uconv2, self._W_uconv3, output_shape=[self.batch_size, 32, 32, 128], 
+                        stride=2) + self._b_uconv3)
 
     def _generate_image(self):
         with tf.name_scope('generated_image'):
-            self._W_uconv3 = weight_variable([5, 5, 3, 64])
-            self._b_uconv3 = bias_variable([3])
+            self._W_uconv4 = weight_variable([5, 5, 3, 128])
+            self._b_uconv4 = bias_variable([3])
             self.y = tf.nn.relu(
-                uconv2d(self.h_uconv2, self._W_uconv3, output_shape=[self.batch_size, 32, 32, 3],
-                        stride=1) + self._b_uconv3)
+                uconv2d(self.h_uconv3, self._W_uconv4, output_shape=[self.batch_size, 32, 32, 3],
+                        stride=1) + self._b_uconv4)
             self.y_padded = tf.pad(self.y, [[0, 0], [16, 16], [16, 16], [0, 0]])
             tf.summary.image("original_image", self.x, max_outputs=12)
             tf.summary.image("generated_image", self.y_padded + self.x_masked, max_outputs=12)
