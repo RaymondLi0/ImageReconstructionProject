@@ -1,13 +1,16 @@
 # ImageReconstructionProject
 
-# Convolutional autoencoder
+## Convolutional autoencoder
 
 Following https://arxiv.org/pdf/1604.07379.pdf it simply encodes the image, then decode it, trying to fill the missing part.
 
-# GAN
+![train_img](figures/exp004_train_imgs1.PNG)
+![train_img](figures/exp004_train_imgs2.PNG)
+
+## GAN
 
 
-# RoadMap
+## RoadMap
 
 - GAN
 

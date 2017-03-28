@@ -116,20 +116,24 @@ class ContextEncoder(object):
                 self._W_conv1 = weight_variable([5, 5, 3, 128])
                 self._W_conv2 = weight_variable([5, 5, 128, 256])
                 self._W_conv3 = weight_variable([5, 5, 256, 512])
-                self._W_conv4 = weight_variable([5, 5, 512, 512])
+                self._W_conv4 = weight_variable([5, 5, 512, 1024])
+                self._W_conv5 = weight_variable([3, 3, 1024, 1024])
                 variable_summaries(self._W_conv1)
                 variable_summaries(self._W_conv2)
                 variable_summaries(self._W_conv3)
                 variable_summaries(self._W_conv4)
+                variable_summaries(self._W_conv5)
             with tf.name_scope('biases'):
                 self._b_conv1 = bias_variable([128])
                 self._b_conv2 = bias_variable([256])
                 self._b_conv3 = bias_variable([512])
-                self._b_conv4 = bias_variable([512])
+                self._b_conv4 = bias_variable([1024])
+                self._b_conv5 = bias_variable([1024])
                 variable_summaries(self._b_conv1)
                 variable_summaries(self._b_conv2)
                 variable_summaries(self._b_conv3)
                 variable_summaries(self._b_conv4)
+                variable_summaries(self._b_conv5)
             self.h_conv1 = tf.nn.relu(conv2d(self.x_masked, self._W_conv1, stride=1) + self._b_conv1)
             self.h_pool1 = max_pool_2x2(self.h_conv1)
 
@@ -142,37 +146,38 @@ class ContextEncoder(object):
             self.h_conv4 = tf.nn.relu(conv2d(self.h_pool3, self._W_conv4, stride=1) + self._b_conv4)
             self.h_pool4 = max_pool_2x2(self.h_conv4)
 
+            self.h_conv5 = tf.nn.relu(conv2d(self.h_pool4, self._W_conv5, stride=1) + self._b_conv5)
+
     def _channel_wise(self):
         with tf.name_scope('channel_wise'):
             with tf.name_scope('weights'):
-                self._W_fc1 = weight_variable([512, 4 * 4, 4 * 4])
+                self._W_fc1 = weight_variable([1024, 4 * 4, 4 * 4])
                 variable_summaries(self._W_fc1)
             with tf.name_scope('biases'):
-                self._b_fc1 = bias_variable([512])
+                self._b_fc1 = bias_variable([1024])
                 variable_summaries(self._b_fc1)
-            self.h_pool4_flat_img = tf.reshape(self.h_pool4, [512, self.batch_size, 4 * 4])
+            self.h_conv5_flat_img = tf.reshape(self.h_conv5, [1024, self.batch_size, 4 * 4])
             self.h_fc1 = tf.nn.relu(
-                tf.reshape(tf.matmul(self.h_pool4_flat_img, self._W_fc1), [self.batch_size, 16, 512]) + self._b_fc1)
+                tf.reshape(tf.matmul(self.h_conv5_flat_img, self._W_fc1), [self.batch_size, 16, 1024]) + self._b_fc1)
 
-            self.h_fc1_img = tf.reshape(self.h_fc1, [-1, 4, 4, 512])
+            self.h_fc1_img = tf.reshape(self.h_fc1, [self.batch_size, 4, 4, 1024])
 
     def _decode(self):
-        # print(self.h_fc1_img.get_shape().as_list())
         with tf.name_scope('decode'):
             with tf.name_scope('weights'):
-                self._W_uconv1 = weight_variable([5, 5, 256, 512])
-                self._W_uconv2 = weight_variable([5, 5, 128, 256])
-                self._W_uconv3 = weight_variable([5, 5, 128, 128])
+                self._W_uconv1 = weight_variable([5, 5, 512, 1024])
+                self._W_uconv2 = weight_variable([5, 5, 256, 512])
+                self._W_uconv3 = weight_variable([5, 5, 128, 256])
             with tf.name_scope('biases'):
-                self._b_uconv1 = bias_variable([256])
-                self._b_uconv2 = bias_variable([128])
+                self._b_uconv1 = bias_variable([512])
+                self._b_uconv2 = bias_variable([256])
                 self._b_uconv3 = bias_variable([128])
             self.h_uconv1 = tf.nn.relu(
-                uconv2d(self.h_fc1_img, self._W_uconv1, output_shape=[self.batch_size, 8, 8, 256],
+                uconv2d(self.h_fc1_img, self._W_uconv1, output_shape=[self.batch_size, 8, 8, 512],
                         stride=2) + self._b_uconv1)
 
             self.h_uconv2 = tf.nn.relu(
-                uconv2d(self.h_uconv1, self._W_uconv2, output_shape=[self.batch_size, 16, 16, 128],
+                uconv2d(self.h_uconv1, self._W_uconv2, output_shape=[self.batch_size, 16, 16, 256],
                         stride=2) + self._b_uconv2)
 
             self.h_uconv3 = tf.nn.relu(
@@ -192,7 +197,7 @@ class ContextEncoder(object):
 
     def _compute_loss(self):
         with tf.name_scope('reconstruction_loss'):
-            self._reconstruction_loss = tf.nn.l2_loss(self.mask * (self.x - self.y_padded))
+            self._reconstruction_loss = tf.nn.l2_loss(self.mask * (self.x - self.y_padded)) / self.batch_size
             tf.summary.scalar('reconstruction_loss', self._reconstruction_loss)
 
     def _optimize(self):
@@ -359,25 +364,21 @@ class ContextEncoder(object):
                 _, loss, summary_str, global_step = self._sess.run(
                     [self.train_fn, self._reconstruction_loss, self.merged_summary, self.global_step],
                     feed_dict={self.x: batch, self.mask: self.np_mask})
-                # print(global_step)
-                # global_step = self._sess.run(self.global_step)
 
                 if global_step % 200 == 0:
-                    print("nb of black and white images so far : {}".format(self.nb_bw_img))
+                    # print("nb of black and white images so far : {}".format(self.nb_bw_img))
 
                     self._save(saver, train_writer, is_iter=True, extras=summary_str)
-                    # self._save(saver, summary_writer, is_iter=False, extras=None)
 
             val_loss = 0
             for i in tqdm(range(n_val_batches)):
                 batch = self._load_valid_batch()
-                loss = self._sess.run(self._reconstruction_loss, feed_dict={self.x: batch, self.mask: self.np_mask})
+                loss, summary_str = self._sess.run([self._reconstruction_loss, self.merged_summary], feed_dict={self.x: batch, self.mask: self.np_mask})
                 val_loss += loss
-
             val_loss /= n_val_batches * self.batch_size
-            # self._save(saver, val_writer, is_iter=False, extras=summary_str)
+            self._save(saver, val_writer, is_iter=False, extras=summary_str)
             val_writer.add_summary(
-                tf.Summary(value=[tf.Summary.Value(tag="val_loss", simple_value=val_loss), ])
+                tf.Summary(value=[tf.Summary.Value(tag="val_loss", simple_value=val_loss), ]), global_step=global_step
             )
             cprint("Epoch {}".format(epoch), color="yellow")
 
