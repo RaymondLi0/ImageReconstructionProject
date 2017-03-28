@@ -116,8 +116,8 @@ class ContextEncoder(object):
                 self._W_conv1 = weight_variable([5, 5, 3, 128])
                 self._W_conv2 = weight_variable([5, 5, 128, 256])
                 self._W_conv3 = weight_variable([5, 5, 256, 512])
-                self._W_conv4 = weight_variable([5, 5, 512, 1024])
-                self._W_conv5 = weight_variable([3, 3, 1024, 1024])
+                self._W_conv4 = weight_variable([5, 5, 512, 512])
+                self._W_conv5 = weight_variable([3, 3, 512, 512])
                 variable_summaries(self._W_conv1)
                 variable_summaries(self._W_conv2)
                 variable_summaries(self._W_conv3)
@@ -127,8 +127,8 @@ class ContextEncoder(object):
                 self._b_conv1 = bias_variable([128])
                 self._b_conv2 = bias_variable([256])
                 self._b_conv3 = bias_variable([512])
-                self._b_conv4 = bias_variable([1024])
-                self._b_conv5 = bias_variable([1024])
+                self._b_conv4 = bias_variable([512])
+                self._b_conv5 = bias_variable([512])
                 variable_summaries(self._b_conv1)
                 variable_summaries(self._b_conv2)
                 variable_summaries(self._b_conv3)
@@ -151,21 +151,21 @@ class ContextEncoder(object):
     def _channel_wise(self):
         with tf.name_scope('channel_wise'):
             with tf.name_scope('weights'):
-                self._W_fc1 = weight_variable([1024, 4 * 4, 4 * 4])
+                self._W_fc1 = weight_variable([512, 4 * 4, 4 * 4])
                 variable_summaries(self._W_fc1)
             with tf.name_scope('biases'):
-                self._b_fc1 = bias_variable([1024])
+                self._b_fc1 = bias_variable([512])
                 variable_summaries(self._b_fc1)
-            self.h_conv5_flat_img = tf.reshape(self.h_conv5, [1024, self.batch_size, 4 * 4])
+            self.h_conv5_flat_img = tf.reshape(self.h_conv5, [512, self.batch_size, 4 * 4])
             self.h_fc1 = tf.nn.relu(
-                tf.reshape(tf.matmul(self.h_conv5_flat_img, self._W_fc1), [self.batch_size, 16, 1024]) + self._b_fc1)
+                tf.reshape(tf.matmul(self.h_conv5_flat_img, self._W_fc1), [self.batch_size, 16, 512]) + self._b_fc1)
 
-            self.h_fc1_img = tf.reshape(self.h_fc1, [self.batch_size, 4, 4, 1024])
+            self.h_fc1_img = tf.reshape(self.h_fc1, [self.batch_size, 4, 4, 512])
 
     def _decode(self):
         with tf.name_scope('decode'):
             with tf.name_scope('weights'):
-                self._W_uconv1 = weight_variable([5, 5, 512, 1024])
+                self._W_uconv1 = weight_variable([5, 5, 512, 512])
                 self._W_uconv2 = weight_variable([5, 5, 256, 512])
                 self._W_uconv3 = weight_variable([5, 5, 128, 256])
             with tf.name_scope('biases'):
