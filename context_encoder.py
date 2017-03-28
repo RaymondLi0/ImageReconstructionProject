@@ -1,13 +1,15 @@
-import tensorflow as tf
-import numpy as np
-import os
-from tqdm import tqdm
-from termcolor import cprint
 import glob
-import PIL.Image as Image
+import os
 import time
+
+import PIL.Image as Image
+import numpy as np
 import params
-import functools
+import tensorflow as tf
+from termcolor import cprint
+from tqdm import tqdm
+
+from ImageReconstructionProject.utils import weight_variable, bias_variable, conv2d, uconv2d, max_pool_2x2, create_dir
 
 
 def variable_summaries(var):
@@ -15,41 +17,7 @@ def variable_summaries(var):
     with tf.name_scope('summaries'):
         mean = tf.reduce_mean(var)
         tf.summary.scalar('mean', mean)
-        # with tf.name_scope('stddev'):
-        #     stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-        # tf.summary.scalar('stddev', stddev)
-        # tf.summary.scalar('max', tf.reduce_max(var))
-        # tf.summary.scalar('min', tf.reduce_min(var))
         tf.summary.histogram('histogram', var)
-
-
-def weight_variable(shape):
-    n_input = functools.reduce(lambda x,y:y*x, shape[:-1])
-    initial = tf.truncated_normal(shape, stddev=np.sqrt(2/n_input))
-    return tf.Variable(initial)
-
-
-def bias_variable(shape):
-    initial = tf.constant(0.01, shape=shape)
-    return tf.Variable(initial)
-
-
-def conv2d(x, W, stride):
-    return tf.nn.conv2d(x, W, strides=[1, stride, stride, 1], padding='SAME')
-
-
-def uconv2d(x, W, output_shape, stride):
-    return tf.nn.conv2d_transpose(x, W, output_shape=output_shape, strides=[1, stride, stride, 1], padding='SAME')
-
-
-def max_pool_2x2(x):
-    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
-                          strides=[1, 2, 2, 1], padding='SAME')
-
-
-def create_dir(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
 
 
 class ContextEncoder(object):
@@ -181,7 +149,7 @@ class ContextEncoder(object):
                         stride=2) + self._b_uconv2)
 
             self.h_uconv3 = tf.nn.relu(
-                uconv2d(self.h_uconv2, self._W_uconv3, output_shape=[self.batch_size, 32, 32, 128], 
+                uconv2d(self.h_uconv2, self._W_uconv3, output_shape=[self.batch_size, 32, 32, 128],
                         stride=2) + self._b_uconv3)
 
     def _generate_image(self):
