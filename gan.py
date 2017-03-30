@@ -8,6 +8,7 @@ import params
 import tensorflow as tf
 from termcolor import cprint
 from tqdm import tqdm
+from batch_loader import BatchLoader
 
 from utils import weight_variable, bias_variable, conv2d, uconv2d, max_pool_2x2, create_dir, avg_pool_2x2
 
@@ -21,27 +22,19 @@ def variable_summaries(var):
 
 
 class ContextEncoder_adv(object):
-    def __init__(self, batch_size, nb_epochs, batch_index=0, mask=None, mscoco=params.DATA_PATH,
-                 train_path=params.TRAIN_PATH,
-                 valid_path=params.VALID_PATH, caption_path=params.CAPTION_PATH,
-                 experiment_path=params.EXPERIMENT_PATH,
+    def __init__(self, batch_size, nb_epochs, mask=None, experiment_path=params.EXPERIMENT_PATH,
                  lambda_adversarial=params.LAMBDA_ADVERSARIAL):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
-        self._train_batch_index = batch_index
-        self._valid_batch_index = batch_index
-        self.mscoco = mscoco
-        self.train_path = train_path
-        self.valid_path = valid_path
-        self.caption_path = caption_path
         self.experiment_path = experiment_path
         self.save_path = os.path.join(self.experiment_path, "model/")
+        self.save_best_path = os.path.join(self.experiment_path, "best_model/")
         self.logs_path = os.path.join(self.experiment_path, "logs")
         self.lambda_adversarial = lambda_adversarial
         create_dir(self.save_path)
         create_dir(self.logs_path)
 
-        self.nb_bw_img = 0
+        self.batch_loader = BatchLoader(self.batch_size)
 
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
@@ -51,19 +44,7 @@ class ContextEncoder_adv(object):
             self.np_mask = np.zeros((1, 64, 64, 1))
             self.np_mask[:, 16:48, 16:48, :] = 1
 
-        self._get_dataset_characteristics()
-
         self._sess = tf.Session()
-
-    def _get_dataset_characteristics(self):
-        train_path = os.path.join(self.mscoco, self.train_path)
-        valid_path = os.path.join(self.mscoco, self.valid_path)
-        # caption_path = os.path.join(mscoco, caption_path)
-        # with open(caption_path) as fd:
-        #     caption_dict = pkl.load(fd)
-
-        self.train_imgs = glob.glob(train_path + "/*.jpg")
-        self.valid_imgs = glob.glob(valid_path + "/*.jpg")
 
     def build_model(self):
         # x : input
@@ -75,7 +56,7 @@ class ContextEncoder_adv(object):
         self._channel_wise()
         self._decode()
         self._generate_image()
-        self._compute_loss()
+        self._reconstruction_loss()
 
         # adversarial loss
         self._init_discriminator_variables()
@@ -183,7 +164,7 @@ class ContextEncoder_adv(object):
             tf.summary.image("original_image", self.x, max_outputs=12)
             tf.summary.image("generated_image", self.y_padded + self.x_masked, max_outputs=12)
 
-    def _compute_loss(self):
+    def _reconstruction_loss(self):
         with tf.name_scope('reconstruction_loss'):
             self._reconstruction_loss = tf.nn.l2_loss(self.mask * (self.x - self.y_padded)) / self.batch_size
             tf.summary.scalar('reconstruction_loss', self._reconstruction_loss)
@@ -226,7 +207,7 @@ class ContextEncoder_adv(object):
             self._discr_variables = [v for v in tf.trainable_variables() if v.name.startswith('discriminator')]
             self._gen_variables = [v for v in tf.trainable_variables() if not v.name.startswith('discriminator')]
             print(len(self._discr_variables), "DISCR VARIABLES ", [v.name for v in self._discr_variables])
-            print(len(self._gen_variables),"GEN VARIABLES", [v.name for v in self._gen_variables])
+            print(len(self._gen_variables), "GEN VARIABLES", [v.name for v in self._gen_variables])
 
             # center of the image only
             self.real_img = tf.slice(self.x, [0, 16, 16, 0], [self.batch_size, 32, 32, 3])
@@ -243,8 +224,8 @@ class ContextEncoder_adv(object):
                 tf.nn.sigmoid_cross_entropy_with_logits(logits=fake_discr, labels=tf.ones_like(fake_discr)))
 
             self._discr_loss = self._discr_adversarial_loss
-            self._gen_loss = self.lambda_adversarial * self._gen_adversarial_loss + (
-                                                                                        1 - self.lambda_adversarial) * self._reconstruction_loss
+            self._gen_loss = self.lambda_adversarial * self._gen_adversarial_loss + \
+                             (1 - self.lambda_adversarial) * self._reconstruction_loss
 
             tf.summary.scalar("discr loss", self._discr_loss)
             tf.summary.scalar("gen full loss (adversarial and reconstruction)", self._gen_loss)
@@ -259,70 +240,16 @@ class ContextEncoder_adv(object):
             self.train_discr = optimizer.apply_gradients(grads_discr, global_step=self.global_step)
             self.train_gen = optimizer.apply_gradients(grads_gen, global_step=self.global_step)
 
-    def _load_train_batch(self):
-        '''
-        get next train batch
-        '''
-        # print("loading batch  index {} ".format(self._train_batch_index))
-        start_time = time.time()
-        batch = np.zeros((self.batch_size, 64, 64, 3))
-
-        batch_imgs = self.train_imgs[
-                     self._train_batch_index * self.batch_size:(self._train_batch_index + 1) * self.batch_size]
-
-        for i, img_path in enumerate(batch_imgs):
-            img = Image.open(img_path)
-            if np.array(img).shape == (64, 64, 3):
-                batch[i] = np.array(img)
-            else:
-                self.nb_bw_img += 1
-
-        N_train_batch = len(self.train_imgs) // self.batch_size
-        self._train_batch_index = (self._train_batch_index + 1) % N_train_batch
-
-        # print("batch loaded in : ", time.time() - start_time)
-
-        return batch
-
-    def _load_valid_batch(self):
-        '''
-        get next valid batch
-        TODO : merge load_batch functions and remove black images
-        '''
-        start_time = time.time()
-        batch = np.zeros((self.batch_size, 64, 64, 3))
-
-        batch_imgs = self.valid_imgs[
-                     self._valid_batch_index * self.batch_size:(self._valid_batch_index + 1) * self.batch_size]
-
-        for i, img_path in enumerate(batch_imgs):
-            img = Image.open(img_path)
-            if np.array(img).shape == (64, 64, 3):
-                batch[i] = np.array(img)
-            else:
-                self.nb_bw_img += 1
-
-        N_valid_batch = len(self.valid_imgs) // self.batch_size
-        self._valid_batch_index = (self._valid_batch_index + 1) % N_valid_batch
-
-        # print("batch loaded in : ", time.time() - start_time)
-
-        return batch
-
-    def _load_valid_data(self):
-        '''
-        get valid data
-        :return:
-        '''
-        n_validation = len(self.valid_imgs) // 5
-        val_imgs = self.valid_imgs[:n_validation]
-
-        for i, img_path in enumerate(val_imgs):
-            img = Image.open(img_path)
-            if np.array(img).shape == (64, 64, 3):
-                val_imgs[i] = np.array(img)
-
-        return val_imgs
+    def _compute_val_loss(self):
+        n_val_batches = self.batch_loader.n_valid_batches // 2
+        val_loss = 0
+        for _ in tqdm(range(n_val_batches)):
+            batch = self.batch_loader.load_batch(train=False)
+            loss, summary_str = self._sess.run([self._reconstruction_loss, self.merged_summary],
+                                               feed_dict={self.x: batch, self.mask: self.np_mask})
+            val_loss += loss
+        val_loss /= n_val_batches
+        return val_loss, summary_str
 
     def _restore(self):
         """
@@ -364,8 +291,7 @@ class ContextEncoder_adv(object):
         saver, train_writer, val_writer = self._restore()
 
         epoch = 0
-        n_train_batches = len(self.train_imgs) // self.batch_size
-        n_val_batches = len(self.valid_imgs) // self.batch_size // 2
+        n_train_batches = self.batch_loader.n_train_batches
 
         # Retrieve current global step
         last_step = self._sess.run(self.global_step)
@@ -373,7 +299,7 @@ class ContextEncoder_adv(object):
         last_iter = last_step - n_train_batches * epoch
         print("last iter {}".format(last_iter))
         print("last step {}".format(last_step))
-        print("epocj {}".format(epoch))
+        print("epoch {}".format(epoch))
         # Iterate over epochs
 
         is_not_restart = False
@@ -383,7 +309,7 @@ class ContextEncoder_adv(object):
                 if i < last_iter and not is_not_restart:
                     continue
                 is_not_restart = True
-                batch = self._load_train_batch()
+                batch = self.batch_loader.load_batch(train=True)
 
                 _ = self._sess.run(self.train_gen, feed_dict={self.x: batch, self.mask: self.np_mask})
                 ops = [self.train_discr, self.global_step]
@@ -396,13 +322,7 @@ class ContextEncoder_adv(object):
                     train_writer.add_summary(output[-1], global_step=output[1])
 
             saver.save(self._sess, global_step=output[1], save_path=self.save_path)
-            val_loss = 0
-            for i in tqdm(range(n_val_batches)):
-                batch = self._load_valid_batch()
-                loss, summary_str = self._sess.run([self._reconstruction_loss, self.merged_summary],
-                                                   feed_dict={self.x: batch, self.mask: self.np_mask})
-                val_loss += loss
-            val_loss /= n_val_batches * self.batch_size
+            val_loss, summary_str = self._compute_val_loss()
             val_writer.add_summary(summary_str, global_step=output[1])
             val_writer.add_summary(
                 tf.Summary(value=[tf.Summary.Value(tag="val_loss", simple_value=val_loss), ]), global_step=output[1]

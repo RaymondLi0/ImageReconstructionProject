@@ -110,7 +110,7 @@ class ContextEncoder(object):
 
             self.h_conv3 = tf.nn.relu(conv2d(self.h_pool2, self._W_conv3, stride=1) + self._b_conv3)
             self.h_pool3 = max_pool_2x2(self.h_conv3)
-            
+
             self.h_conv4 = tf.nn.relu(conv2d(self.h_pool3, self._W_conv4, stride=1) + self._b_conv4)
             self.h_pool4 = max_pool_2x2(self.h_conv4)
 
