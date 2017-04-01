@@ -22,7 +22,7 @@ class BatchLoader(object):
         self._get_dataset_characteristics()
 
         self.train_batch_index = self.train_batch_index % self.n_train_batches
-        self.valid_batch_index = self;valid_batch_index % self.n_valid_batches
+        self.valid_batch_index = self.valid_batch_index % self.n_valid_batches
 
     def _get_dataset_characteristics(self):
         train_path = os.path.join(self.mscoco, self.train_path)
