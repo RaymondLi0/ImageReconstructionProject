@@ -209,9 +209,11 @@ class ContextEncoder_adv(object):
             print(len(self._discr_variables), "DISCR VARIABLES ", [v.name for v in self._discr_variables])
             print(len(self._gen_variables), "GEN VARIABLES", [v.name for v in self._gen_variables])
 
-            # center of the image only
+            # discriminate the center of the image only
             self.real_img = tf.slice(self.x, [0, 16, 16, 0], [self.batch_size, 32, 32, 3])
+            # D(real img)
             real_discr = self._discriminator_encoder(self.real_img)
+            # D(G(img))
             fake_discr = self._discriminator_encoder(self.y)
 
             real_discr_loss = tf.reduce_mean(
@@ -223,7 +225,9 @@ class ContextEncoder_adv(object):
             self._gen_adversarial_loss = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(logits=fake_discr, labels=tf.ones_like(fake_discr)))
 
+            # Disriminator loss
             self._discr_loss = self._discr_adversarial_loss
+            # Generator loss (combination of reconstruction and adversarial loss)
             self._gen_loss = self.lambda_adversarial * self._gen_adversarial_loss + \
                              (1 - self.lambda_adversarial) * self._reconstruction_loss
 
@@ -234,9 +238,14 @@ class ContextEncoder_adv(object):
     def _optimize(self):
         with tf.variable_scope("optimizer"):
             optimizer = tf.train.AdamOptimizer()
+
+            # Context-encoder
+            grads = optimizer.compute_gradients(self._reconstruction_loss)
+            self.train_fn = optimizer.apply_gradients(grads, global_step=self.global_step)
+
+            # Context-encoder with adversarial loss
             grads_discr = optimizer.compute_gradients(loss=self._discr_loss, var_list=self._discr_variables)
             grads_gen = optimizer.compute_gradients(loss=self._gen_loss, var_list=self._gen_variables)
-
             self.train_discr = optimizer.apply_gradients(grads_discr, global_step=self.global_step)
             self.train_gen = optimizer.apply_gradients(grads_gen, global_step=self.global_step)
 
