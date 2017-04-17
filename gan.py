@@ -1,5 +1,6 @@
 import glob
 import os
+import sys
 import time
 
 import PIL.Image as Image
@@ -22,21 +23,24 @@ def variable_summaries(var):
 
 
 class ContextEncoder_adv(object):
-    def __init__(self, batch_size, nb_epochs, mask=None, experiment_path=params.EXPERIMENT_PATH,
-                 lambda_adversarial=params.LAMBDA_ADVERSARIAL):
+    def __init__(self, batch_size=params.BATCH_SIZE, nb_epochs=params.NB_EPOCHS, mask=None,
+                 experiment_path=params.EXPERIMENT_PATH,
+                 lambda_adversarial=params.LAMBDA_ADVERSARIAL, patience=params.PATIENCE):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
         self.experiment_path = experiment_path
         self.save_path = os.path.join(self.experiment_path, "model/")
         self.save_best_path = os.path.join(self.experiment_path, "best_model/")
         self.logs_path = os.path.join(self.experiment_path, "logs")
-        self.lambda_adversarial = lambda_adversarial
+
+        self.global_step = tf.Variable(0, trainable=False, name='global_step')
+        # self.lambda_adversarial = lambda_adversarial
+        self.lambda_adversarial = 1-tf.train.exponential_decay(.1, self.global_step, 2000, .95)
+        self.patience = patience
         create_dir(self.save_path)
         create_dir(self.logs_path)
 
         self.batch_loader = BatchLoader(self.batch_size)
-
-        self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
         if mask is not None:
             self.np_mask = mask
@@ -89,25 +93,51 @@ class ContextEncoder_adv(object):
                 variable_summaries(self._b_conv3)
                 variable_summaries(self._b_conv4)
                 variable_summaries(self._b_conv5)
+            with tf.name_scope('BN'):
+                self._gamma1 = tf.Variable(tf.constant(1.0, shape=[3]))
+                self._beta1 = tf.Variable(tf.constant(0.0, shape=[3]))
+                self._gamma2 = tf.Variable(tf.constant(1.0, shape=[128]))
+                self._beta2 = tf.Variable(tf.constant(0.0, shape=[128]))
+                self._gamma3 = tf.Variable(tf.constant(1.0, shape=[256]))
+                self._beta3 = tf.Variable(tf.constant(0.0, shape=[256]))
+                self._gamma4 = tf.Variable(tf.constant(1.0, shape=[512]))
+                self._beta4 = tf.Variable(tf.constant(0.0, shape=[512]))
+                self._gamma5 = tf.Variable(tf.constant(1.0, shape=[512]))
+                self._beta5 = tf.Variable(tf.constant(0.0, shape=[512]))
 
             # 64 64 3
-            self.h_conv1 = tf.nn.relu(conv2d(self.x_masked, self._W_conv1, stride=1) + self._b_conv1)
+            mean, variance = tf.nn.moments(self.x_masked, [0, 1, 2])
+            self.x_masked_norm = tf.nn.batch_normalization(self.x_masked, mean, variance, offset=self._beta1,
+                                                           scale=self._gamma1, variance_epsilon=1e-6)
+            self.h_conv1 = tf.nn.relu(conv2d(self.x_masked_norm, self._W_conv1, stride=1) + self._b_conv1)
             self.h_pool1 = avg_pool_2x2(self.h_conv1)
 
             # 32 32 128
-            self.h_conv2 = tf.nn.relu(conv2d(self.h_pool1, self._W_conv2, stride=1) + self._b_conv2)
+            mean, variance = tf.nn.moments(self.h_pool1, [0, 1, 2])
+            self.h_pool1_norm = tf.nn.batch_normalization(self.h_pool1, mean, variance, offset=self._beta2,
+                                                           scale=self._gamma2, variance_epsilon=1e-6)
+            self.h_conv2 = tf.nn.relu(conv2d(self.h_pool1_norm, self._W_conv2, stride=1) + self._b_conv2)
             self.h_pool2 = avg_pool_2x2(self.h_conv2)
 
             # 16 16 256
-            self.h_conv3 = tf.nn.relu(conv2d(self.h_pool2, self._W_conv3, stride=1) + self._b_conv3)
+            mean, variance = tf.nn.moments(self.h_pool2, [0, 1, 2])
+            self.h_pool2_norm = tf.nn.batch_normalization(self.h_pool2, mean, variance, offset=self._beta3,
+                                                           scale=self._gamma3, variance_epsilon=1e-6)
+            self.h_conv3 = tf.nn.relu(conv2d(self.h_pool2_norm, self._W_conv3, stride=1) + self._b_conv3)
             self.h_pool3 = avg_pool_2x2(self.h_conv3)
 
             # 8 8 512
-            self.h_conv4 = tf.nn.relu(conv2d(self.h_pool3, self._W_conv4, stride=1) + self._b_conv4)
+            mean, variance = tf.nn.moments(self.h_pool3, [0, 1, 2])
+            self.h_pool3_norm = tf.nn.batch_normalization(self.h_pool3, mean, variance, offset=self._beta4,
+                                                           scale=self._gamma4, variance_epsilon=1e-6)
+            self.h_conv4 = tf.nn.relu(conv2d(self.h_pool3_norm, self._W_conv4, stride=1) + self._b_conv4)
             self.h_pool4 = avg_pool_2x2(self.h_conv4)
 
             # 4 4 512
-            self.h_conv5 = tf.nn.relu(conv2d(self.h_pool4, self._W_conv5, stride=1) + self._b_conv5)
+            mean, variance = tf.nn.moments(self.h_pool4, [0, 1, 2])
+            self.h_pool4_norm = tf.nn.batch_normalization(self.h_pool4, mean, variance, offset=self._beta5,
+                                                           scale=self._gamma5, variance_epsilon=1e-6)
+            self.h_conv5 = tf.nn.relu(conv2d(self.h_pool4_norm, self._W_conv5, stride=1) + self._b_conv5)
 
             # 4 4 512
 
@@ -155,7 +185,7 @@ class ContextEncoder_adv(object):
         with tf.name_scope('generated_image'):
             self._W_uconv4 = weight_variable([5, 5, 3, 128])
             self._b_uconv4 = bias_variable([3])
-            self.y = tf.nn.relu(
+            self.y = tf.nn.tanh(
                 uconv2d(self.h_uconv3, self._W_uconv4, output_shape=[self.batch_size, 32, 32, 3],
                         stride=1) + self._b_uconv4)
             # 32 32 3
@@ -217,7 +247,7 @@ class ContextEncoder_adv(object):
             fake_discr = self._discriminator_encoder(self.y)
 
             real_discr_loss = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(logits=real_discr, labels=tf.ones_like(real_discr)))
+                tf.nn.sigmoid_cross_entropy_with_logits(logits=real_discr, labels=.9*tf.ones_like(real_discr)))
             fake_discr_loss = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(logits=fake_discr, labels=tf.zeros_like(fake_discr)))
 
@@ -312,6 +342,8 @@ class ContextEncoder_adv(object):
         # Iterate over epochs
 
         is_not_restart = False
+        patience_count = 0
+        best_val_loss = 1e10
         while epoch < self.nb_epochs:
 
             for i in tqdm(range(n_train_batches)):
@@ -349,6 +381,6 @@ class ContextEncoder_adv(object):
 
 
 if __name__ == '__main__':
-    ce = ContextEncoder_adv(batch_size=32, nb_epochs=50)
+    ce = ContextEncoder_adv()
     ce.build_model()
     ce.train()
