@@ -53,6 +53,8 @@ class ContextEncoder_adv(object):
     def build_model(self):
         # x : input
         self.x = tf.placeholder(tf.float32, shape=[self.batch_size, 64, 64, 3])
+        self.x = 2 * tf.image.convert_image_dtype(self.x, dtype=tf.float32) - 1
+
         self.mask = tf.placeholder(tf.float32, shape=[1, 64, 64, 1])
         self.x_masked = self.x * (1 - self.mask)
 
