@@ -53,10 +53,10 @@ class ContextEncoder_adv(object):
     def build_model(self):
         # x : input
         self.x = tf.placeholder(tf.float32, shape=[self.batch_size, 64, 64, 3])
-        self.x = 2 * tf.image.convert_image_dtype(self.x, dtype=tf.float32) - 1
+        self.x_float = 2 * tf.image.convert_image_dtype(self.x, dtype=tf.float32) - 1
 
         self.mask = tf.placeholder(tf.float32, shape=[1, 64, 64, 1])
-        self.x_masked = self.x * (1 - self.mask)
+        self.x_masked = self.x_float * (1 - self.mask)
 
         self._encode()
         self._channel_wise()
@@ -193,12 +193,12 @@ class ContextEncoder_adv(object):
             # 32 32 3
             self.y_padded = tf.pad(self.y, [[0, 0], [16, 16], [16, 16], [0, 0]])
             # 64 64 3
-            tf.summary.image("original_image", self.x, max_outputs=12)
+            tf.summary.image("original_image", self.x_float, max_outputs=12)
             tf.summary.image("generated_image", self.y_padded + self.x_masked, max_outputs=12)
 
     def _reconstruction_loss(self):
         with tf.name_scope('reconstruction_loss'):
-            self._reconstruction_loss = tf.nn.l2_loss(self.mask * (self.x - self.y_padded)) / self.batch_size
+            self._reconstruction_loss = tf.nn.l2_loss(self.mask * (self.x_float - self.y_padded)) / self.batch_size
             tf.summary.scalar('reconstruction_loss', self._reconstruction_loss)
 
     def _init_discriminator_variables(self):
@@ -242,7 +242,7 @@ class ContextEncoder_adv(object):
             print(len(self._gen_variables), "GEN VARIABLES", [v.name for v in self._gen_variables])
 
             # discriminate the center of the image only
-            self.real_img = tf.slice(self.x, [0, 16, 16, 0], [self.batch_size, 32, 32, 3])
+            self.real_img = tf.slice(self.x_float, [0, 16, 16, 0], [self.batch_size, 32, 32, 3])
             # D(real img)
             real_discr = self._discriminator_encoder(self.real_img)
             # D(G(img))
