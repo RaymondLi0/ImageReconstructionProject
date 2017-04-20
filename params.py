@@ -12,6 +12,6 @@ BATCH_SIZE = 32
 NB_EPOCHS = 80
 PATIENCE = 15
 
-EXPERIMENT_PATH = os.path.join(path, "experiments/gan009")
+EXPERIMENT_PATH = os.path.join(path, "experiments/gan012")
 
-LAMBDA_ADVERSARIAL = .999
+LAMBDA_ADVERSARIAL = .5
