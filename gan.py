@@ -25,7 +25,8 @@ def variable_summaries(var):
 class ContextEncoder_adv(object):
     def __init__(self, batch_size=params.BATCH_SIZE, nb_epochs=params.NB_EPOCHS, mask=None,
                  experiment_path=params.EXPERIMENT_PATH,
-                 lambda_adversarial=params.LAMBDA_ADVERSARIAL, patience=params.PATIENCE):
+                 lambda_adversarial=params.LAMBDA_ADVERSARIAL, patience=params.PATIENCE,
+                 discr_whole_image=params.DISCR_WHOLE_IMAGE):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
         self.experiment_path = experiment_path
@@ -38,6 +39,7 @@ class ContextEncoder_adv(object):
         self.lambda_adversarial = lambda_adversarial
         # self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 2000, .95)
         self.patience = patience
+        self.discr_whole_image = discr_whole_image
         create_dir(self.save_path)
         create_dir(self.logs_path)
 
@@ -214,31 +216,44 @@ class ContextEncoder_adv(object):
                 self._W_discr1 = weight_variable([5, 5, 3, 128])
                 self._W_discr2 = weight_variable([5, 5, 128, 256])
                 self._W_discr3 = weight_variable([5, 5, 256, 512])
+                if self.discr_whole_image:
+                    self._W_discr4 = weight_variable([5, 5, 512, 512])
                 self._W_dfc = weight_variable([4 * 4 * 512, 1])
 
             with tf.name_scope('biases'):
                 self._b_discr1 = bias_variable([128])
                 self._b_discr2 = bias_variable([256])
                 self._b_discr3 = bias_variable([512])
+                if self.discr_whole_image:
+                    self._b_discr4 = bias_variable([512])
                 self._b_dfc = bias_variable([1])
 
     def _discriminator_encoder(self, image):
         with tf.name_scope('discriminator_encoder'):
-            # image is 32 32 3
+            # image is 32 32 3 OR 64 64 3 (if whole image)
             h_d1 = tf.nn.relu(conv2d(image, self._W_discr1, stride=1, is_training=self.phase) + self._b_discr1)
             h_dpool1 = avg_pool_2x2(h_d1)
 
-            # 16 16 128
+            # 16 16 128 OR 32 32 128 (if whole image)
             h_d2 = tf.nn.relu(conv2d(h_dpool1, self._W_discr2, stride=1, is_training=self.phase) + self._b_discr2)
             h_dpool2 = avg_pool_2x2(h_d2)
 
-            # 8 8 256
+            # 8 8 256 OR 16 16 256 (if whole image)
             h_d3 = tf.nn.relu(conv2d(h_dpool2, self._W_discr3, stride=1, is_training=self.phase) + self._b_discr3)
             h_dpool3 = avg_pool_2x2(h_d3)
 
-            # 4 4 512
-            h_dpool3_flat = tf.reshape(h_dpool3, [self.batch_size, 4 * 4 * 512])
-            discr = tf.matmul(h_dpool3_flat, self._W_dfc) + self._b_dfc
+            if self.discr_whole_image:
+                # 8 8 512 (if whole image)
+                h_d4 = tf.nn.relu(conv2d(h_dpool3, self._W_discr4, stride=1, is_training=self.phase) + self._b_discr4)
+                h_dpool4 = avg_pool_2x2(h_d4)
+
+                # 4 4 512 (if whole image)
+                h_dpool4_flat = tf.reshape(h_dpool4, [self.batch_size, 4*4*512])
+                discr = tf.matmul(h_dpool4_flat, self._W_dfc) + self._b_dfc
+            else:
+                # 4 4 512
+                h_dpool3_flat = tf.reshape(h_dpool3, [self.batch_size, 4 * 4 * 512])
+                discr = tf.matmul(h_dpool3_flat, self._W_dfc) + self._b_dfc
             return discr
 
     def _adversarial_loss(self):
@@ -248,12 +263,19 @@ class ContextEncoder_adv(object):
             print(len(self._discr_variables), "DISCR VARIABLES ", [v.name for v in self._discr_variables])
             print(len(self._gen_variables), "GEN VARIABLES", [v.name for v in self._gen_variables])
 
-            # discriminate the center of the image only
-            self.real_img = tf.slice(self.x_float, [0, 16, 16, 0], [self.batch_size, 32, 32, 3])
-            # D(real img)
-            real_discr = self._discriminator_encoder(self.real_img)
-            # D(G(img))
-            fake_discr = self._discriminator_encoder(self.y)
+            if self.discr_whole_image:
+                # D(real img)
+                real_discr = self._discriminator_encoder(self.x_float)
+                # D(G(img))
+                fake_discr = self._discriminator_encoder(self.y_padded + self.x_masked)
+
+            else:
+                # discriminate the center of the image only
+                self.real_img = tf.slice(self.x_float, [0, 16, 16, 0], [self.batch_size, 32, 32, 3])
+                # D(real img)
+                real_discr = self._discriminator_encoder(self.real_img)
+                # D(G(img))
+                fake_discr = self._discriminator_encoder(self.y)
 
             real_discr_loss = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(logits=real_discr, labels=.9 * tf.ones_like(real_discr)))
