@@ -151,7 +151,7 @@ class ContextEncoder_adv(object):
                 conv2d(self.h_pool4, self._W_conv5, stride=1, is_training=self.phase) + self._b_conv5)
 
             # 4 4 512
-            keep_prob = tf.cond(self.phase, lambda: .5, lambda: 1)
+            keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
             self.h_conv5_drop = tf.nn.dropout(self.h_conv5, keep_prob)
 
     def _channel_wise(self):
@@ -193,7 +193,7 @@ class ContextEncoder_adv(object):
                         stride=2, is_training=self.phase) + self._b_uconv3)
 
             # 32 32 128
-            keep_prob = tf.cond(self.phase, lambda: .5, lambda: 1)
+            keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
             self.h_uconv3_drop = tf.nn.dropout(self.h_uconv3, keep_prob)
 
     def _generate_image(self):
@@ -255,7 +255,7 @@ class ContextEncoder_adv(object):
 
             # 4 4 512
             h_dfinal_flat = tf.reshape(h_dfinal, [self.batch_size, 4 * 4 * 512])
-            keep_prob = tf.cond(self.phase, lambda: .5, lambda: 1)
+            keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
             h_dfinal_drop = tf.nn.dropout(h_dfinal_flat, keep_prob)
             discr = tf.matmul(h_dfinal_drop, self._W_dfc) + self._b_dfc
             return discr
