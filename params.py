@@ -12,7 +12,7 @@ BATCH_SIZE = 32
 NB_EPOCHS = 150
 PATIENCE = 15
 
-EXPERIMENT_PATH = os.path.join(path, "experiments/gan015")
+EXPERIMENT_PATH = os.path.join(path, "experiments/gan017")
 
 LAMBDA_ADVERSARIAL = .9
 DISCR_WHOLE_IMAGE = True

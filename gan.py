@@ -36,8 +36,8 @@ class ContextEncoder_adv(object):
 
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.phase = tf.placeholder(tf.bool, name='phase')
-        self.lambda_adversarial = lambda_adversarial
-        # self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 2000, .95)
+        # self.lambda_adversarial = lambda_adversarial
+        self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 10000, .5, staircase=True)
         self.patience = patience
         self.discr_whole_image = discr_whole_image
         create_dir(self.save_path)
@@ -151,6 +151,8 @@ class ContextEncoder_adv(object):
                 conv2d(self.h_pool4, self._W_conv5, stride=1, is_training=self.phase) + self._b_conv5)
 
             # 4 4 512
+            keep_prob = tf.cond(self.phase, .5, 1)
+            self.h_conv5_drop = tf.nn.dropout(self.h_conv5, keep_prob)
 
     def _channel_wise(self):
         with tf.name_scope('channel_wise'):
@@ -160,7 +162,7 @@ class ContextEncoder_adv(object):
             with tf.name_scope('biases'):
                 self._b_fc1 = bias_variable([512])
                 variable_summaries(self._b_fc1)
-            self.h_conv5_flat_img = tf.reshape(self.h_conv5, [512, self.batch_size, 4 * 4])
+            self.h_conv5_flat_img = tf.reshape(self.h_conv5_drop, [512, self.batch_size, 4 * 4])
             self.h_fc1 = tf.nn.relu(
                 tf.reshape(tf.matmul(self.h_conv5_flat_img, self._W_fc1), [self.batch_size, 16, 512]) + self._b_fc1)
 
@@ -191,13 +193,15 @@ class ContextEncoder_adv(object):
                         stride=2, is_training=self.phase) + self._b_uconv3)
 
             # 32 32 128
+            keep_prob = tf.cond(self.phase, .5, 1)
+            self.h_uconv3_drop = tf.nn.dropout(self.h_uconv3, keep_prob)
 
     def _generate_image(self):
         with tf.name_scope('generated_image'):
             self._W_uconv4 = weight_variable([5, 5, 3, 128])
             self._b_uconv4 = bias_variable([3])
             self.y = tf.nn.tanh(
-                uconv2d(self.h_uconv3, self._W_uconv4, output_shape=[self.batch_size, 32, 32, 3],
+                uconv2d(self.h_uconv3_drop, self._W_uconv4, output_shape=[self.batch_size, 32, 32, 3],
                         stride=1, is_training=self.phase) + self._b_uconv4)
             # 32 32 3
             self.y_padded = tf.pad(self.y, [[0, 0], [16, 16], [16, 16], [0, 0]])
@@ -245,15 +249,15 @@ class ContextEncoder_adv(object):
             if self.discr_whole_image:
                 # 8 8 512 (if whole image)
                 h_d4 = tf.nn.relu(conv2d(h_dpool3, self._W_discr4, stride=1, is_training=self.phase) + self._b_discr4)
-                h_dpool4 = avg_pool_2x2(h_d4)
-
-                # 4 4 512 (if whole image)
-                h_dpool4_flat = tf.reshape(h_dpool4, [self.batch_size, 4*4*512])
-                discr = tf.matmul(h_dpool4_flat, self._W_dfc) + self._b_dfc
+                h_dfinal = avg_pool_2x2(h_d4)
             else:
-                # 4 4 512
-                h_dpool3_flat = tf.reshape(h_dpool3, [self.batch_size, 4 * 4 * 512])
-                discr = tf.matmul(h_dpool3_flat, self._W_dfc) + self._b_dfc
+                h_dfinal = h_dpool3
+
+            # 4 4 512
+            h_dfinal_flat = tf.reshape(h_dfinal, [self.batch_size, 4 * 4 * 512])
+            keep_prob = tf.cond(self.phase, .5, 1)
+            h_dfinal_drop = tf.nn.dropout(h_dfinal_flat, keep_prob)
+            discr = tf.matmul(h_dfinal_drop, self._W_dfc) + self._b_dfc
             return discr
 
     def _adversarial_loss(self):
