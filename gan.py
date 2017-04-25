@@ -24,9 +24,9 @@ def variable_summaries(var):
 
 class ContextEncoder_adv(object):
     def __init__(self, batch_size=params.BATCH_SIZE, nb_epochs=params.NB_EPOCHS, mask=None,
-                 experiment_path=params.EXPERIMENT_PATH,
+                 experiment_path=params.EXPERIMENT_PATH, use_adversarial_loss=params.USE_ADVERSARIAL_LOSS,
                  lambda_adversarial=params.LAMBDA_ADVERSARIAL, patience=params.PATIENCE,
-                 discr_whole_image=params.DISCR_WHOLE_IMAGE):
+                 discr_whole_image=params.DISCR_WHOLE_IMAGE, use_dropout = params.USE_DROPOUT):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
         self.experiment_path = experiment_path
@@ -36,10 +36,13 @@ class ContextEncoder_adv(object):
 
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.phase = tf.placeholder(tf.bool, name='phase')
+        self.use_adversarial_loss = use_adversarial_loss
+        self.lambda_adversarial = lambda_adversarial
         self.lambda_adversarial = lambda_adversarial
         # self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 10000, .5, staircase=True)
         self.patience = patience
         self.discr_whole_image = discr_whole_image
+        self.use_dropout = use_dropout
         create_dir(self.save_path)
         create_dir(self.logs_path)
 
@@ -151,8 +154,11 @@ class ContextEncoder_adv(object):
                 conv2d(self.h_pool4, self._W_conv5, stride=1, is_training=self.phase) + self._b_conv5)
 
             # 4 4 512
-            keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
-            self.h_conv5_drop = tf.nn.dropout(self.h_conv5, keep_prob)
+            if self.use_dropout:
+                keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
+                self.h_conv5_drop = tf.nn.dropout(self.h_conv5, keep_prob)
+            else:
+                self.h_conv5_drop = self.h_conv5
 
     def _channel_wise(self):
         with tf.name_scope('channel_wise'):
@@ -193,8 +199,11 @@ class ContextEncoder_adv(object):
                         stride=2, is_training=self.phase) + self._b_uconv3)
 
             # 32 32 128
-            keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
-            self.h_uconv3_drop = tf.nn.dropout(self.h_uconv3, keep_prob)
+            if self.use_dropout:
+                keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
+                self.h_uconv3_drop = tf.nn.dropout(self.h_uconv3, keep_prob)
+            else:
+                self.h_uconv3_drop = self.h_uconv3
 
     def _generate_image(self):
         with tf.name_scope('generated_image'):
@@ -255,8 +264,11 @@ class ContextEncoder_adv(object):
 
             # 4 4 512
             h_dfinal_flat = tf.reshape(h_dfinal, [self.batch_size, 4 * 4 * 512])
-            keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
-            h_dfinal_drop = tf.nn.dropout(h_dfinal_flat, keep_prob)
+            if self.use_dropout:
+                keep_prob = tf.cond(self.phase, lambda: tf.constant(.5), lambda: tf.constant(1.))
+                h_dfinal_drop = tf.nn.dropout(h_dfinal_flat, keep_prob)
+            else:
+                h_dfinal_drop = h_dfinal_flat
             discr = tf.matmul(h_dfinal_drop, self._W_dfc) + self._b_dfc
             return discr
 
@@ -390,8 +402,10 @@ class ContextEncoder_adv(object):
                 is_not_restart = True
                 batch = self.batch_loader.load_batch(train=True)
 
-                _ = self._sess.run(self.train_gen, feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
-                ops = [self.train_discr, self.global_step]
+                if self.use_adversarial_loss:
+                    _ = self._sess.run(self.train_gen, feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
+
+                ops = [self.train_discr, self.global_step] if self.use_adversarial_loss else [self.train_fn, self.global_step]
                 if i % 200 == 0:
                     ops.append(self.merged_summary)
                 output = self._sess.run(ops, feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
@@ -407,6 +421,14 @@ class ContextEncoder_adv(object):
                 tf.Summary(value=[tf.Summary.Value(tag="val_loss", simple_value=val_loss), ]), global_step=output[1]
             )
             cprint("Epoch {}".format(epoch), color="yellow")
+
+            # early stopping
+            if val_loss < best_val_loss:
+                patience_count=0
+            else:
+                patience_count+=1
+                if patience_count >= self.patience:
+                    break
 
             epoch += 1
 
