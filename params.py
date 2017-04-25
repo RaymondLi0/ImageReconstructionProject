@@ -19,5 +19,6 @@ USE_DROPOUT = False
 
 # Parameters of adversarial loss
 USE_ADVERSARIAL_LOSS = False
+LAMBDA_DECAY = False
 LAMBDA_ADVERSARIAL = .9
 DISCR_WHOLE_IMAGE = True

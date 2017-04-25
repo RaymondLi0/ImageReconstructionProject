@@ -11,7 +11,9 @@ from termcolor import cprint
 from tqdm import tqdm
 from batch_loader import BatchLoader
 
-from utils import weight_variable, bias_variable, conv2d, uconv2d, max_pool_2x2, create_dir, avg_pool_2x2
+from utils import weight_variable, bias_variable, conv2d, uconv2d, max_pool_2x2, create_dir, avg_pool_2x2, leaky_relu
+
+activation_function = leaky_relu
 
 
 def variable_summaries(var):
@@ -25,26 +27,30 @@ def variable_summaries(var):
 class ContextEncoder_adv(object):
     def __init__(self, batch_size=params.BATCH_SIZE, nb_epochs=params.NB_EPOCHS, mask=None,
                  experiment_path=params.EXPERIMENT_PATH, use_adversarial_loss=params.USE_ADVERSARIAL_LOSS,
-                 lambda_adversarial=params.LAMBDA_ADVERSARIAL, patience=params.PATIENCE,
-                 discr_whole_image=params.DISCR_WHOLE_IMAGE, use_dropout = params.USE_DROPOUT):
+                 lambda_decay=params.LAMBDA_DECAY, lambda_adversarial=params.LAMBDA_ADVERSARIAL, patience=params.PATIENCE,
+                 discr_whole_image=params.DISCR_WHOLE_IMAGE, use_dropout=params.USE_DROPOUT):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
         self.experiment_path = experiment_path
         self.save_path = os.path.join(self.experiment_path, "model/")
         self.save_best_path = os.path.join(self.experiment_path, "best_model/")
         self.logs_path = os.path.join(self.experiment_path, "logs")
+        create_dir(self.save_path)
+        create_dir(self.logs_path)
 
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
         self.phase = tf.placeholder(tf.bool, name='phase')
+        self.patience = patience
+
+        # parameters for adversarial loss
         self.use_adversarial_loss = use_adversarial_loss
         self.lambda_adversarial = lambda_adversarial
-        self.lambda_adversarial = lambda_adversarial
-        # self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 10000, .5, staircase=True)
-        self.patience = patience
+        if lambda_decay:
+            self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 10000, .5, staircase=True)
+            tf.summary.scalar("lambda_adversarial", self.lambda_adversarial)
         self.discr_whole_image = discr_whole_image
+
         self.use_dropout = use_dropout
-        create_dir(self.save_path)
-        create_dir(self.logs_path)
 
         self.batch_loader = BatchLoader(self.batch_size)
 
@@ -102,55 +108,29 @@ class ContextEncoder_adv(object):
                 variable_summaries(self._b_conv3)
                 variable_summaries(self._b_conv4)
                 variable_summaries(self._b_conv5)
-            # with tf.name_scope('BN'):
-            #     self._gamma1 = tf.Variable(tf.constant(1.0, shape=[3]))
-            #     self._beta1 = tf.Variable(tf.constant(0.0, shape=[3]))
-            #     self._gamma2 = tf.Variable(tf.constant(1.0, shape=[128]))
-            #     self._beta2 = tf.Variable(tf.constant(0.0, shape=[128]))
-            #     self._gamma3 = tf.Variable(tf.constant(1.0, shape=[256]))
-            #     self._beta3 = tf.Variable(tf.constant(0.0, shape=[256]))
-            #     self._gamma4 = tf.Variable(tf.constant(1.0, shape=[512]))
-            #     self._beta4 = tf.Variable(tf.constant(0.0, shape=[512]))
-            #     self._gamma5 = tf.Variable(tf.constant(1.0, shape=[512]))
-            #     self._beta5 = tf.Variable(tf.constant(0.0, shape=[512]))
 
             # 64 64 3
-            # mean, variance = tf.nn.moments(self.x_masked, [0, 1, 2])
-            # self.x_masked_norm = tf.nn.batch_normalization(self.x_masked, mean, variance, offset=self._beta1,
-            #                                                scale=self._gamma1, variance_epsilon=1e-6)
-            self.h_conv1 = tf.nn.relu(
+            self.h_conv1 = activation_function(
                 conv2d(self.x_masked, self._W_conv1, stride=1, is_training=self.phase) + self._b_conv1)
             self.h_pool1 = avg_pool_2x2(self.h_conv1)
 
             # 32 32 128
-            mean, variance = tf.nn.moments(self.h_pool1, [0, 1, 2])
-            # self.h_pool1_norm = tf.nn.batch_normalization(self.h_pool1, mean, variance, offset=self._beta2,
-            #                                               scale=self._gamma2, variance_epsilon=1e-6)
-            self.h_conv2 = tf.nn.relu(
+            self.h_conv2 = activation_function(
                 conv2d(self.h_pool1, self._W_conv2, stride=1, is_training=self.phase) + self._b_conv2)
             self.h_pool2 = avg_pool_2x2(self.h_conv2)
 
             # 16 16 256
-            mean, variance = tf.nn.moments(self.h_pool2, [0, 1, 2])
-            # self.h_pool2_norm = tf.nn.batch_normalization(self.h_pool2, mean, variance, offset=self._beta3,
-            #                                               scale=self._gamma3, variance_epsilon=1e-6)
-            self.h_conv3 = tf.nn.relu(
+            self.h_conv3 = activation_function(
                 conv2d(self.h_pool2, self._W_conv3, stride=1, is_training=self.phase) + self._b_conv3)
             self.h_pool3 = avg_pool_2x2(self.h_conv3)
 
             # 8 8 512
-            mean, variance = tf.nn.moments(self.h_pool3, [0, 1, 2])
-            # self.h_pool3_norm = tf.nn.batch_normalization(self.h_pool3, mean, variance, offset=self._beta4,
-            #                                               scale=self._gamma4, variance_epsilon=1e-6)
-            self.h_conv4 = tf.nn.relu(
+            self.h_conv4 = activation_function(
                 conv2d(self.h_pool3, self._W_conv4, stride=1, is_training=self.phase) + self._b_conv4)
             self.h_pool4 = avg_pool_2x2(self.h_conv4)
 
             # 4 4 512
-            mean, variance = tf.nn.moments(self.h_pool4, [0, 1, 2])
-            # self.h_pool4_norm = tf.nn.batch_normalization(self.h_pool4, mean, variance, offset=self._beta5,
-            #                                               scale=self._gamma5, variance_epsilon=1e-6)
-            self.h_conv5 = tf.nn.relu(
+            self.h_conv5 = activation_function(
                 conv2d(self.h_pool4, self._W_conv5, stride=1, is_training=self.phase) + self._b_conv5)
 
             # 4 4 512
@@ -169,7 +149,7 @@ class ContextEncoder_adv(object):
                 self._b_fc1 = bias_variable([512])
                 variable_summaries(self._b_fc1)
             self.h_conv5_flat_img = tf.reshape(self.h_conv5_drop, [512, self.batch_size, 4 * 4])
-            self.h_fc1 = tf.nn.relu(
+            self.h_fc1 = activation_function(
                 tf.reshape(tf.matmul(self.h_conv5_flat_img, self._W_fc1), [self.batch_size, 16, 512]) + self._b_fc1)
 
             self.h_fc1_img = tf.reshape(self.h_fc1, [self.batch_size, 4, 4, 512])
@@ -184,17 +164,17 @@ class ContextEncoder_adv(object):
                 self._b_uconv1 = bias_variable([512])
                 self._b_uconv2 = bias_variable([256])
                 self._b_uconv3 = bias_variable([128])
-            self.h_uconv1 = tf.nn.relu(
+            self.h_uconv1 = activation_function(
                 uconv2d(self.h_fc1_img, self._W_uconv1, output_shape=[self.batch_size, 8, 8, 512],
                         stride=2, is_training=self.phase) + self._b_uconv1)
 
             # 8 8 512
-            self.h_uconv2 = tf.nn.relu(
+            self.h_uconv2 = activation_function(
                 uconv2d(self.h_uconv1, self._W_uconv2, output_shape=[self.batch_size, 16, 16, 256],
                         stride=2, is_training=self.phase) + self._b_uconv2)
 
             # 16 16 256
-            self.h_uconv3 = tf.nn.relu(
+            self.h_uconv3 = activation_function(
                 uconv2d(self.h_uconv2, self._W_uconv3, output_shape=[self.batch_size, 32, 32, 128],
                         stride=2, is_training=self.phase) + self._b_uconv3)
 
@@ -214,9 +194,10 @@ class ContextEncoder_adv(object):
                         stride=1, is_training=self.phase) + self._b_uconv4)
             # 32 32 3
             self.y_padded = tf.pad(self.y, [[0, 0], [16, 16], [16, 16], [0, 0]])
+            self.generated_image = self.y_padded + self.x_masked
             # 64 64 3
             tf.summary.image("original_image", self.x_float, max_outputs=12)
-            tf.summary.image("generated_image", self.y_padded + self.x_masked, max_outputs=12)
+            tf.summary.image("generated_image", self.generated_image, max_outputs=12)
 
     def _reconstruction_loss(self):
         with tf.name_scope('reconstruction_loss'):
@@ -244,20 +225,26 @@ class ContextEncoder_adv(object):
     def _discriminator_encoder(self, image):
         with tf.name_scope('discriminator_encoder'):
             # image is 32 32 3 OR 64 64 3 (if whole image)
-            h_d1 = tf.nn.relu(conv2d(image, self._W_discr1, stride=1, is_training=self.phase) + self._b_discr1)
+            h_d1 = activation_function(conv2d(image, self._W_discr1, stride=1, is_training=self.phase) + self._b_discr1)
             h_dpool1 = avg_pool_2x2(h_d1)
 
             # 16 16 128 OR 32 32 128 (if whole image)
-            h_d2 = tf.nn.relu(conv2d(h_dpool1, self._W_discr2, stride=1, is_training=self.phase) + self._b_discr2)
+            h_d2 = activation_function(
+                conv2d(h_dpool1, self._W_discr2, stride=1, is_training=self.phase) + self._b_discr2
+            )
             h_dpool2 = avg_pool_2x2(h_d2)
 
             # 8 8 256 OR 16 16 256 (if whole image)
-            h_d3 = tf.nn.relu(conv2d(h_dpool2, self._W_discr3, stride=1, is_training=self.phase) + self._b_discr3)
+            h_d3 = activation_function(
+                conv2d(h_dpool2, self._W_discr3, stride=1, is_training=self.phase) + self._b_discr3
+            )
             h_dpool3 = avg_pool_2x2(h_d3)
 
             if self.discr_whole_image:
                 # 8 8 512 (if whole image)
-                h_d4 = tf.nn.relu(conv2d(h_dpool3, self._W_discr4, stride=1, is_training=self.phase) + self._b_discr4)
+                h_d4 = activation_function(
+                    conv2d(h_dpool3, self._W_discr4, stride=1, is_training=self.phase) + self._b_discr4
+                )
                 h_dfinal = avg_pool_2x2(h_d4)
             else:
                 h_dfinal = h_dpool3
@@ -283,7 +270,7 @@ class ContextEncoder_adv(object):
                 # D(real img)
                 real_discr = self._discriminator_encoder(self.x_float)
                 # D(G(img))
-                fake_discr = self._discriminator_encoder(self.y_padded + self.x_masked)
+                fake_discr = self._discriminator_encoder(self.generated_image)
 
             else:
                 # discriminate the center of the image only
@@ -403,9 +390,11 @@ class ContextEncoder_adv(object):
                 batch = self.batch_loader.load_batch(train=True)
 
                 if self.use_adversarial_loss:
-                    _ = self._sess.run(self.train_gen, feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
+                    _ = self._sess.run(self.train_gen,
+                                       feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
 
-                ops = [self.train_discr, self.global_step] if self.use_adversarial_loss else [self.train_fn, self.global_step]
+                ops = [self.train_discr, self.global_step] if self.use_adversarial_loss else [self.train_fn,
+                                                                                              self.global_step]
                 if i % 200 == 0:
                     ops.append(self.merged_summary)
                 output = self._sess.run(ops, feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
@@ -424,9 +413,9 @@ class ContextEncoder_adv(object):
 
             # early stopping
             if val_loss < best_val_loss:
-                patience_count=0
+                patience_count = 0
             else:
-                patience_count+=1
+                patience_count += 1
                 if patience_count >= self.patience:
                     break
 
