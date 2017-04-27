@@ -27,8 +27,10 @@ def variable_summaries(var):
 class ContextEncoder_adv(object):
     def __init__(self, batch_size=params.BATCH_SIZE, nb_epochs=params.NB_EPOCHS, mask=None,
                  experiment_path=params.EXPERIMENT_PATH, use_adversarial_loss=params.USE_ADVERSARIAL_LOSS,
-                 lambda_decay=params.LAMBDA_DECAY, lambda_adversarial=params.LAMBDA_ADVERSARIAL, patience=params.PATIENCE,
-                 discr_whole_image=params.DISCR_WHOLE_IMAGE, use_dropout=params.USE_DROPOUT):
+                 lambda_decay=params.LAMBDA_DECAY, lambda_adversarial=params.LAMBDA_ADVERSARIAL,
+                 patience=params.PATIENCE,
+                 discr_whole_image=params.DISCR_WHOLE_IMAGE, discr_loss_limit=params.DISCR_LOSS_LIMIT,
+                 use_dropout=params.USE_DROPOUT):
         self.batch_size = batch_size
         self.nb_epochs = nb_epochs
         self.experiment_path = experiment_path
@@ -49,6 +51,7 @@ class ContextEncoder_adv(object):
             self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 10000, .5, staircase=True)
             tf.summary.scalar("lambda_adversarial", self.lambda_adversarial)
         self.discr_whole_image = discr_whole_image
+        self.discr_loss_limit = discr_loss_limit
 
         self.use_dropout = use_dropout
 
@@ -390,11 +393,21 @@ class ContextEncoder_adv(object):
                 batch = self.batch_loader.load_batch(train=True)
 
                 if self.use_adversarial_loss:
-                    _ = self._sess.run(self.train_gen,
-                                       feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
+                    # no discr_loss_limit
+                    if self.discr_loss_limit >= 1:
+                        _ = self._sess.run(self.train_discr,
+                                           feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
+                    # there is a discr_loss_limit
+                    # train the discriminator only if its loss is higher than discr_loss_limit
+                    else:
+                        discr_loss = self._sess.run(self._discr_loss,
+                                                    feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
+                        if discr_loss >= self.discr_loss_limit:
+                            _ = self._sess.run(self.train_discr,
+                                               feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
 
-                ops = [self.train_discr, self.global_step] if self.use_adversarial_loss else [self.train_fn,
-                                                                                              self.global_step]
+                ops = [self.train_gen, self.global_step] if self.use_adversarial_loss else [self.train_fn,
+                                                                                            self.global_step]
                 if i % 200 == 0:
                     ops.append(self.merged_summary)
                 output = self._sess.run(ops, feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})

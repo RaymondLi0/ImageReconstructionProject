@@ -13,12 +13,13 @@ NB_EPOCHS = 150
 # patience for early stopping
 PATIENCE = 15
 # path to save logs and model
-EXPERIMENT_PATH = os.path.join(path, "experiments/exp006")
+EXPERIMENT_PATH = os.path.join(path, "experiments/gan022")
 # whether to use dropout
 USE_DROPOUT = False
 
 # Parameters of adversarial loss
-USE_ADVERSARIAL_LOSS = False
+USE_ADVERSARIAL_LOSS = True
 LAMBDA_DECAY = False
-LAMBDA_ADVERSARIAL = .9
+LAMBDA_ADVERSARIAL = .998
 DISCR_WHOLE_IMAGE = True
+DISCR_LOSS_LIMIT = .2
