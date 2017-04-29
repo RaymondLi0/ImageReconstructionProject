@@ -49,9 +49,9 @@ class ContextEncoder_adv(object):
         self.lambda_adversarial = lambda_adversarial
         if lambda_decay:
             self.lambda_adversarial = 1 - tf.train.exponential_decay(.1, self.global_step, 10000, .5, staircase=True)
-            tf.summary.scalar("lambda_adversarial", self.lambda_adversarial)
         self.discr_whole_image = discr_whole_image
         self.discr_loss_limit = discr_loss_limit
+        self.num_discr_trained = tf.Variable(tf.constant(0, dtype=tf.int32), trainable=False)
 
         self.use_dropout = use_dropout
 
@@ -64,6 +64,8 @@ class ContextEncoder_adv(object):
             self.np_mask[:, 16:48, 16:48, :] = 1
 
         self._sess = tf.Session()
+        tf.summary.scalar("lambda_adversarial", self.lambda_adversarial)
+        tf.summary.scalar("num discr trained", self.num_discr_trained)
 
     def build_model(self):
         # x : input
@@ -384,6 +386,7 @@ class ContextEncoder_adv(object):
         patience_count = 0
         best_val_loss = 1e10
 
+
         while epoch < self.nb_epochs:
 
             for i in tqdm(range(n_train_batches)):
@@ -403,6 +406,7 @@ class ContextEncoder_adv(object):
                         discr_loss = self._sess.run(self._discr_loss,
                                                     feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
                         if discr_loss >= self.discr_loss_limit:
+                            self.num_discr_trained += 1
                             _ = self._sess.run(self.train_discr,
                                                feed_dict={self.x: batch, self.mask: self.np_mask, self.phase: 1})
 
